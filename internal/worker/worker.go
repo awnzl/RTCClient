@@ -1,10 +1,8 @@
 package worker
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -21,21 +19,25 @@ type Worker struct {
 	done        chan struct{}
 	interrupt   chan os.Signal
 	message     chan domain.Message
+	uiSender    chan string // todo add handling of ui buffers
+	uiReceiver  chan string
 }
 
-func New(conn *websocket.Conn, interrupt chan os.Signal) *Worker {
+func New(conn *websocket.Conn, interrupt chan os.Signal, sender, receiver chan string) *Worker {
 	return &Worker{
-		conn:      conn,
-		done:      make(chan struct{}),
-		interrupt: interrupt,
-		message:   make(chan domain.Message),
+		conn:       conn,
+		done:       make(chan struct{}),
+		interrupt:  interrupt,
+		message:    make(chan domain.Message),
+		uiSender:   sender,
+		uiReceiver: receiver,
 	}
 }
 
 func (w *Worker) Run() {
 	go w.reader()
 	go w.writer()
-	w.work()
+	go w.work()
 }
 
 func (w *Worker) reader() {
@@ -48,7 +50,7 @@ func (w *Worker) reader() {
 			return
 		}
 
-		log.Printf("recv: %s", message)
+		w.uiReceiver <- string(message)
 	}
 }
 
@@ -61,13 +63,13 @@ func (w *Worker) writer() {
 		case msg := <-w.message:
 			bts, err := json.Marshal(msg)
 			if err != nil {
-				log.Println("writer marshalling:", err)
+				log.Println("[writer] marshalling:", err)
 				return // todo: or continue?
 			}
 
 			err = w.conn.WriteMessage(websocket.TextMessage, bts)
 			if err != nil {
-				log.Println("writer write:", err)
+				log.Println("[writer] write:", err)
 				return // todo: or continue?
 			}
 
@@ -111,44 +113,28 @@ func (w *Worker) work() {
 				continue
 			}
 
-			bts, err := json.Marshal(msg)
-			if err != nil {
-				log.Println("[work] marshalling:", err)
-				continue
-			}
-
-			err = w.conn.WriteMessage(websocket.TextMessage, bts)
-			if err != nil {
-				log.Println("[work] write:", err)
-				continue
-			}
+			w.message <- msg
 		}
 	}
 }
 
 func (w *Worker) getInputMessage() (domain.Message, error) {
-	text, err := readInput()
-	if err != nil {
-		return domain.Message{}, err
-	}
-
 	var msgType int
+	text := <-w.uiSender
 
 	switch text[0] {
 	case 'j':
-		log.Println("join input")
 		msgType = domain.Join
 		w.currentRoom = strings.TrimSpace(text[2:])
 		text = ""
 
 	case 'l':
-		log.Println("leave input")
 		msgType = domain.Leave
+		text = ""
 
 	case 's':
-		log.Println("send input")
-		text = strings.TrimSpace(text[2:])
 		msgType = domain.Send
+		text = strings.TrimSpace(text[2:])
 
 	default:
 		return domain.Message{}, errors.New("incorrect message input scheme")
@@ -162,17 +148,4 @@ func (w *Worker) getInputMessage() (domain.Message, error) {
 	}
 
 	return msg, nil
-}
-
-func readInput() (string, error) {
-	reader := bufio.NewReader(os.Stdin)
-
-	fmt.Print("Enter text: ")
-	text, err := reader.ReadString('\n')
-
-	if err != nil {
-		return "", err
-	}
-
-	return text, nil
 }
