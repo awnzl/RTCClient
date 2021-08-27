@@ -16,7 +16,7 @@ func main() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
-	conn, err := connect("localhost:8080", "/ws")
+	conn, err := connect("localhost:8080", "/v1/ws")
 	if err != nil {
 		log.Fatal("connection dial:", err)
 	}

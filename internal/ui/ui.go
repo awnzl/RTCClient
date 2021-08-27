@@ -126,7 +126,7 @@ func (ui *GUI) updateOutputViewBuf(msg string) error {
 	ui.gui.Update(func(g *gocui.Gui) error {
 		v, err := g.View(outputViewName)
 		if err != nil {
-			log.Println("[updateOutputViewBuf] ui.gui.Update:", err)
+			return err
 		}
 
 		v.Clear()
